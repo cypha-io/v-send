@@ -1,6 +1,6 @@
-import { User, WalletAccount, Transaction, TransactionFilter } from '@/types/wallet';
-import { StorageService } from './storage';
+import { Transaction, TransactionFilter, User, WalletAccount } from '@/types/wallet';
 import { CryptoService } from './crypto';
+import { StorageService } from './storage';
 
 export class WalletService {
   /**
@@ -64,7 +64,7 @@ export class WalletService {
   /**
    * Create a wallet account for a user
    */
-  static async createWalletAccount(userId: string, currency: string = 'USD'): Promise<WalletAccount> {
+  static async createWalletAccount(userId: string, currency: string = 'GHS'): Promise<WalletAccount> {
     try {
       const existingAccount = await StorageService.getWalletAccount();
       if (existingAccount && existingAccount.userId === userId) {

@@ -1,7 +1,7 @@
-import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
-import { User, WalletAccount, Transaction, AuthState, WalletState } from '@/types/wallet';
-import { WalletService } from '@/services/wallet';
-import { StorageService } from '@/services/storage';
+import { appwriteAuthService } from '@/services/appwriteAuth';
+import appwriteWalletService from '@/services/appwriteWallet';
+import { AuthState, Transaction, User, WalletAccount, WalletState } from '@/types/wallet';
+import React, { createContext, ReactNode, useContext, useEffect, useReducer } from 'react';
 
 // Auth Context
 type AuthAction = 
@@ -58,47 +58,154 @@ const AuthContext = createContext<{
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [state, dispatch] = useReducer(authReducer, initialAuthState);
 
-  useEffect(() => {
-    loadStoredAuth();
-  }, []);
-
   const loadStoredAuth = async () => {
     try {
-      const [user, token] = await Promise.all([
-        StorageService.getUser(),
-        StorageService.getAuthToken(),
-      ]);
-
-      if (user) {
-        dispatch({ type: 'LOGIN', payload: { user, token: token || undefined } });
-      } else {
-        dispatch({ type: 'SET_LOADING', payload: false });
-      }
+      // For now, we'll skip the stored auth loading since Appwrite handles this differently
+      // In a full implementation, you'd check for existing Appwrite sessions
+      dispatch({ type: 'SET_LOADING', payload: false });
     } catch (error) {
       console.error('Error loading stored auth:', error);
       dispatch({ type: 'SET_LOADING', payload: false });
     }
   };
 
+  useEffect(() => {
+    loadStoredAuth();
+  }, []); // Empty dependency array is correct here
+
   const login = async (phoneNumber: string): Promise<User> => {
     try {
       dispatch({ type: 'SET_LOADING', payload: true });
       
-      let user = await WalletService.getUserByPhone(phoneNumber);
+      console.log('🔍 Checking if user exists with phone:', phoneNumber);
       
-      if (!user) {
-        user = await WalletService.createUser(phoneNumber);
+      // First, check if user already exists in our database
+      let existingUser = await appwriteWalletService.getUserByPhone(phoneNumber);
+      
+      if (existingUser) {
+        console.log('✅ User found in database:', existingUser);
+        console.log('User has complete profile:', !!(existingUser.firstName && existingUser.lastName));
+        
+        // User exists - attempt to authenticate them
+        const tempPassword = 'password123'; // In production, this would be proper auth
+        
+        try {
+          // Check if already authenticated as this user
+          try {
+            const currentAuthUser = await appwriteAuthService.getCurrentUser();
+            if (currentAuthUser && currentAuthUser.$id === existingUser.$id) {
+              console.log('🎉 User already authenticated');
+              dispatch({ type: 'LOGIN', payload: { user: existingUser as any, token: currentAuthUser.$id } });
+              return existingUser as any;
+            } else if (currentAuthUser) {
+              // Different user session active - logout first
+              console.log('Different user session active, logging out...');
+              await appwriteAuthService.logout();
+            }
+          } catch {
+            // No current user, continue with login
+            console.log('No current session, proceeding with login');
+          }
+          
+          // Try to login existing user
+          await appwriteAuthService.login(phoneNumber, tempPassword);
+          const authUser = await appwriteAuthService.getCurrentUser();
+          
+          if (authUser) {
+            console.log('🎉 Existing user logged in successfully');
+            dispatch({ type: 'LOGIN', payload: { user: existingUser as any, token: authUser.$id } });
+            return existingUser as any;
+          }
+        } catch (authError) {
+          console.error('Authentication failed for existing user:', authError);
+          throw new Error('Authentication failed');
+        }
+      }
+      
+      console.log('📝 New user - creating account and profile');
+      
+      // User doesn't exist - create new account and profile
+      const tempPassword = 'password123';
+      
+      // Make sure no session is active before creating new account
+      try {
+        const currentUser = await appwriteAuthService.getCurrentUser();
+        if (currentUser) {
+          console.log('Clearing existing session before creating new account');
+          await appwriteAuthService.logout();
+        }
+      } catch {
+        // No session active, continue
+      }
+      
+      try {
+        // Create new Appwrite auth account
+        const newAuthUser = await appwriteAuthService.createAccount(phoneNumber, tempPassword);
+        console.log('Auth account created:', newAuthUser.$id);
+        
+        // Since account creation automatically creates a session, get current user
+        const currentUser = await appwriteAuthService.getCurrentUser();
+        
+        if (!currentUser) {
+          throw new Error('Failed to authenticate after account creation');
+        }
+        
+        console.log('Creating user profile with minimal info for setup');
+        // Create user profile with phone number (names will be added in setup)
+        const newUser = await appwriteWalletService.createUserProfile(
+          currentUser.$id, 
+          phoneNumber, 
+          '' // Empty name - will be filled in setup
+        );
+        
+        console.log('User profile created:', newUser);
+        
         // Create wallet account for new user
-        await WalletService.createWalletAccount(user.id);
+        console.log('Creating wallet account for user:', newUser.$id);
+        await appwriteWalletService.createWalletAccount(newUser.$id!);
+        console.log('✅ Wallet account created successfully');
+        
+        dispatch({ type: 'LOGIN', payload: { user: newUser as any, token: currentUser.$id } });
+        return newUser as any;
+        
+      } catch (createError: any) {
+        if (createError.message?.includes('already exists') || createError.code === 409) {
+          console.log('Account exists in auth but not in our DB - recovering...');
+          
+          // Account exists in auth but not in our database - try to login
+          try {
+            await appwriteAuthService.login(phoneNumber, tempPassword);
+          } catch (loginError: any) {
+            if (loginError.message?.includes('session is active')) {
+              // Session already active, just get current user
+              console.log('Session already active, getting current user');
+            } else {
+              throw loginError;
+            }
+          }
+          
+          const existingAuthUser = await appwriteAuthService.getCurrentUser();
+          
+          if (existingAuthUser) {
+            // Create the missing user profile
+            const recoveredUser = await appwriteWalletService.createUserProfile(
+              existingAuthUser.$id, 
+              phoneNumber, 
+              '' // Empty name - will be filled in setup
+            );
+            
+            // Create wallet account
+            await appwriteWalletService.createWalletAccount(recoveredUser.$id!);
+            
+            dispatch({ type: 'LOGIN', payload: { user: recoveredUser as any, token: existingAuthUser.$id } });
+            return recoveredUser as any;
+          }
+        }
+        throw createError;
       }
 
-      // Generate a simple auth token (in production, this would come from a server)
-      const token = `token_${user.id}_${Date.now()}`;
-      await StorageService.saveAuthToken(token);
-
-      dispatch({ type: 'LOGIN', payload: { user, token } });
-      return user;
     } catch (error) {
+      console.error('❌ Login error:', error);
       dispatch({ type: 'SET_LOADING', payload: false });
       throw error;
     }
@@ -106,7 +213,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const logout = async () => {
     try {
-      await WalletService.logout();
+      if (state.user) {
+        await appwriteWalletService.logout((state.user as any).$id || state.user.id);
+      }
       dispatch({ type: 'LOGOUT' });
     } catch (error) {
       console.error('Error during logout:', error);
@@ -116,9 +225,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const updateUser = async (updates: Partial<User>) => {
     try {
-      const updatedUser = await WalletService.updateUser(updates);
+      if (!state.user) {
+        throw new Error('No authenticated user to update');
+      }
+
+      const userId = (state.user as any).$id || state.user.id;
+      if (!userId) {
+        throw new Error('User ID is required for update');
+      }
+
+      console.log('Updating user with ID:', userId, 'Updates:', updates);
+      const updatesWithId = { ...updates, $id: userId };
+      const updatedUser = await appwriteWalletService.updateUser(updatesWithId as any);
+      console.log('User updated successfully:', updatedUser);
+      
       if (updatedUser) {
-        dispatch({ type: 'UPDATE_USER', payload: updatedUser });
+        dispatch({ type: 'UPDATE_USER', payload: updatedUser as any });
       }
     } catch (error) {
       console.error('Error updating user:', error);
@@ -219,32 +341,60 @@ const WalletContext = createContext<{
 
 export const WalletProvider = ({ children }: { children: ReactNode }) => {
   const [state, dispatch] = useReducer(walletReducer, initialWalletState);
+  const { state: authState } = useAuth();
+
+  const getCurrentUserId = (): string => {
+    if (!authState.user) {
+      throw new Error('User not authenticated');
+    }
+    // Support both old and new user ID formats
+    return (authState.user as any).$id || authState.user.id;
+  };
 
   const loadWalletData = async (userId: string) => {
     try {
       dispatch({ type: 'SET_LOADING', payload: true });
+      console.log('Loading wallet data for user ID:', userId);
       
       const [account, transactions] = await Promise.all([
-        WalletService.getWalletAccount(userId),
-        WalletService.getTransactionHistory(),
+        appwriteWalletService.getWalletAccount(userId),
+        appwriteWalletService.getTransactionHistory(userId),
       ]);
 
+      console.log('Loaded wallet account:', account);
+      console.log('Loaded transactions count:', transactions?.length || 0);
+
       if (account) {
-        dispatch({ type: 'SET_ACCOUNT', payload: account });
-        dispatch({ type: 'SET_TRANSACTIONS', payload: transactions });
+        dispatch({ type: 'SET_ACCOUNT', payload: account as any });
+        dispatch({ type: 'SET_TRANSACTIONS', payload: transactions as any });
       } else {
+        console.warn('No wallet account found for user:', userId);
         dispatch({ type: 'SET_ERROR', payload: 'No wallet account found' });
       }
     } catch (error) {
-      console.error('Error loading wallet data:', error);
+      console.error('Error loading wallet data for user:', userId, error);
       dispatch({ type: 'SET_ERROR', payload: 'Failed to load wallet data' });
     }
   };
 
+  // Load wallet data when user changes, but only once per user
+  useEffect(() => {
+    if (authState.user && authState.isAuthenticated) {
+      const userId = (authState.user as any).$id || authState.user.id;
+      console.log('User changed, loading wallet for user ID:', userId);
+      loadWalletData(userId);
+    } else {
+      // Clear wallet when user logs out
+      console.log('Clearing wallet data - user not authenticated');
+      dispatch({ type: 'CLEAR_WALLET' });
+    }
+  }, [authState.user, authState.isAuthenticated]); // Depend on full user object and auth status
+
   const creditWallet = async (amount: number, description: string) => {
     try {
-      const transaction = await WalletService.creditWallet(amount, description);
-      dispatch({ type: 'ADD_TRANSACTION', payload: transaction });
+      const userId = getCurrentUserId();
+      const transaction = await appwriteWalletService.creditWallet(userId, amount, description);
+      dispatch({ type: 'ADD_TRANSACTION', payload: transaction as any });
       dispatch({ type: 'UPDATE_BALANCE', payload: (state.account?.balance || 0) + amount });
     } catch (error) {
       console.error('Error crediting wallet:', error);
@@ -254,8 +404,9 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
 
   const debitWallet = async (amount: number, description: string) => {
     try {
-      const transaction = await WalletService.debitWallet(amount, description);
-      dispatch({ type: 'ADD_TRANSACTION', payload: transaction });
+      const userId = getCurrentUserId();
+      const transaction = await appwriteWalletService.debitWallet(userId, amount, description);
+      dispatch({ type: 'ADD_TRANSACTION', payload: transaction as any });
       dispatch({ type: 'UPDATE_BALANCE', payload: (state.account?.balance || 0) - amount });
     } catch (error) {
       console.error('Error debiting wallet:', error);
@@ -265,7 +416,8 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
 
   const setWalletPin = async (pin: string) => {
     try {
-      await WalletService.setWalletPin(pin);
+      const userId = getCurrentUserId();
+      await appwriteWalletService.setWalletPin(userId, pin);
     } catch (error) {
       console.error('Error setting wallet PIN:', error);
       throw error;
@@ -274,7 +426,8 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
 
   const verifyWalletPin = async (pin: string): Promise<boolean> => {
     try {
-      return await WalletService.verifyWalletPin(pin);
+      const userId = getCurrentUserId();
+      return await appwriteWalletService.verifyWalletPin(userId, pin);
     } catch (error) {
       console.error('Error verifying wallet PIN:', error);
       return false;
@@ -283,7 +436,8 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
 
   const hasWalletPin = async (): Promise<boolean> => {
     try {
-      return await WalletService.hasWalletPin();
+      const userId = getCurrentUserId();
+      return await appwriteWalletService.hasWalletPin(userId);
     } catch (error) {
       console.error('Error checking wallet PIN:', error);
       return false;
@@ -292,8 +446,9 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
 
   const refreshTransactions = async () => {
     try {
-      const transactions = await WalletService.getTransactionHistory();
-      dispatch({ type: 'SET_TRANSACTIONS', payload: transactions });
+      const userId = getCurrentUserId();
+      const transactions = await appwriteWalletService.getTransactionHistory(userId);
+      dispatch({ type: 'SET_TRANSACTIONS', payload: transactions as any });
     } catch (error) {
       console.error('Error refreshing transactions:', error);
     }

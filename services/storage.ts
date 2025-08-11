@@ -1,6 +1,6 @@
+import { Transaction, User, WalletAccount } from '@/types/wallet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import { User, WalletAccount, Transaction, AuthState } from '@/types/wallet';
 
 const STORAGE_KEYS = {
   USER: '@wallet_user',
