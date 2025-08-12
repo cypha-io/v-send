@@ -35,6 +35,15 @@ export class AppwriteWalletService {
     }
   }
 
+  async getUserById(userId: string): Promise<User | null> {
+    try {
+      return await this.storageService.getUserById(userId);
+    } catch (error) {
+      console.error('Error getting user by ID:', error);
+      throw error;
+    }
+  }
+
   async updateUser(updates: Partial<User>): Promise<User | null> {
     try {
       if (!updates.$id) {

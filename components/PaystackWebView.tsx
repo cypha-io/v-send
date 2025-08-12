@@ -4,7 +4,6 @@ import { paymentVerificationService } from '@/services/paymentVerificationServic
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { ActivityIndicator, Alert, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { WebView } from 'react-native-webview';
 
 interface PaystackWebViewProps {
   visible: boolean;
@@ -23,6 +22,8 @@ export function PaystackWebView({ visible, paymentUrl, onPaymentComplete, onClos
   const textColor = useThemeColor({}, 'text');
   const tintColor = useThemeColor({}, 'tint');
 
+  console.log('🔍 PaystackWebView render:', { visible, paymentUrl: paymentUrl ? 'SET' : 'NOT_SET' });
+
   const handleNavigationStateChange = async (navState: any) => {
     const { url } = navState;
     setCurrentUrl(url);
@@ -37,23 +38,23 @@ export function PaystackWebView({ visible, paymentUrl, onPaymentComplete, onClos
       
       if (reference && authState.user) {
         try {
-          const userId = (authState.user as any).$id || authState.user.id;
-          const verification = await paymentVerificationService.completePaymentFlow(userId, reference);
+          const verificationResult = await paymentVerificationService.verifyPayment(reference);
           
-          setTimeout(() => {
-            setVerifying(false);
-            onPaymentComplete(reference, verification.success ? 'success' : 'failed');
-          }, 2000); // Give some time to show verification
+          if (verificationResult.success) {
+            onPaymentComplete(reference, 'success');
+          } else {
+            onPaymentComplete(reference, 'failed');
+          }
         } catch (error) {
-          console.error('Payment verification failed:', error);
-          setVerifying(false);
+          console.error('Payment verification error:', error);
           onPaymentComplete(reference, 'failed');
         }
       } else {
-        setVerifying(false);
         onPaymentComplete('', 'failed');
       }
-    } else if (url.includes('failed') || url.includes('cancelled') || url.includes('error')) {
+      setVerifying(false);
+    } else if (url.includes('cancel') || url.includes('failed')) {
+      // Handle cancellation or failure
       setTimeout(() => {
         onPaymentComplete('', 'failed');
       }, 1000);
@@ -72,11 +73,13 @@ export function PaystackWebView({ visible, paymentUrl, onPaymentComplete, onClos
     );
   };
 
+  console.log('📱 PaystackWebView Modal about to render with visible:', visible);
+  
   return (
     <Modal
       visible={visible}
       animationType="slide"
-      presentationStyle="pageSheet"
+      presentationStyle="fullScreen"
       onRequestClose={onClose}
     >
       <View style={[styles.container, { backgroundColor }]}>
@@ -105,28 +108,23 @@ export function PaystackWebView({ visible, paymentUrl, onPaymentComplete, onClos
           </View>
         )}
 
-        {/* WebView */}
-        <WebView
-          source={{ uri: paymentUrl }}
-          onNavigationStateChange={handleNavigationStateChange}
-          onLoadStart={() => setLoading(true)}
-          onLoadEnd={() => setLoading(false)}
-          onError={handleError}
-          style={styles.webView}
-          javaScriptEnabled={true}
-          domStorageEnabled={true}
-          startInLoadingState={true}
-          scalesPageToFit={true}
-          mixedContentMode="compatibility"
-          allowsInlineMediaPlayback={true}
-          mediaPlaybackRequiresUserAction={false}
-        />
+        {/* Test view to verify modal is showing */}
+        <View style={styles.webView}>
+          <Text style={[styles.loadingText, { color: textColor }]}>
+            TEST: PaystackWebView is visible! {paymentUrl ? '✅ URL SET' : '❌ NO URL'}
+          </Text>
+          {paymentUrl && (
+            <Text style={[styles.debugText, { color: textColor }]} numberOfLines={2}>
+              URL: {paymentUrl}
+            </Text>
+          )}
+        </View>
 
         {/* Current URL indicator (for debugging) */}
         {__DEV__ && currentUrl && (
           <View style={[styles.debugContainer, { backgroundColor: textColor + '10' }]}>
             <Text style={[styles.debugText, { color: textColor }]} numberOfLines={1}>
-              {currentUrl}
+              Current URL: {currentUrl}
             </Text>
           </View>
         )}
@@ -146,7 +144,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    paddingTop: 50, // Account for status bar
+    paddingTop: 50,
   },
   closeButton: {
     padding: 8,
@@ -156,7 +154,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   placeholder: {
-    width: 40, // Same width as close button for centering
+    width: 40,
   },
   loadingContainer: {
     position: 'absolute',
@@ -171,9 +169,13 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 16,
     fontSize: 16,
+    textAlign: 'center',
   },
   webView: {
     flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
   },
   debugContainer: {
     padding: 8,
@@ -181,5 +183,7 @@ const styles = StyleSheet.create({
   debugText: {
     fontSize: 12,
     fontFamily: 'monospace',
+    textAlign: 'center',
+    marginTop: 10,
   },
 });

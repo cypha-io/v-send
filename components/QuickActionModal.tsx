@@ -29,6 +29,8 @@ export function QuickActionModal({ visible, onClose, type }: QuickActionModalPro
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [recipientName, setRecipientName] = useState('');
+  const [isValidatingRecipient, setIsValidatingRecipient] = useState(false);
   const [bankCode, setBankCode] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [accountName, setAccountName] = useState('');
@@ -182,18 +184,34 @@ export function QuickActionModal({ visible, onClose, type }: QuickActionModalPro
     if (!authState.user) {
       throw new Error('User not authenticated');
     }
+
+    if (!pin) {
+      Alert.alert('Error', 'Please enter your PIN to authorize this top-up');
+      return;
+    }
+
     const userId = (authState.user as any).$id || authState.user.id;
+    console.log('🚀 About to call topUpWallet...');
     const { paymentUrl: url } = await enhancedWalletService.topUpWallet({
       userId,
       amount,
       description,
       paymentMethod: 'card',
-      pin: '000000', // Temporary PIN for top-up, will be validated later when PIN is mandatory
+      pin: pin,
     });
 
-    // Show PaystackWebView instead of opening browser
+    console.log('💳 Payment URL received:', url);
+    console.log('📱 About to set PaystackWebView visible...');
+    
+    // Show PaystackWebView 
     setPaymentUrl(url);
     setShowPaystackWebView(true);
+    
+    console.log('✅ PaystackWebView state set:', { 
+      paymentUrl: url, 
+      showPaystackWebView: true,
+      currentShowPaystackWebView: showPaystackWebView
+    });
   };
 
     const handleSendMoney = async (amount: number, description: string) => {
@@ -267,10 +285,52 @@ export function QuickActionModal({ visible, onClose, type }: QuickActionModalPro
     setShowBankList(false);
   };
 
+  // Validate and fetch recipient name when phone number changes
+  const validateRecipient = async (phone: string) => {
+    if (!phone || phone.length < 10 || !authState.user) {
+      setRecipientName('');
+      return;
+    }
+
+    try {
+      setIsValidatingRecipient(true);
+      const userId = (authState.user as any).$id || authState.user.id;
+      const formattedPhone = enhancedWalletService.formatPhoneNumber(phone);
+      const recipient = await enhancedWalletService.validateRecipient(userId, formattedPhone);
+      
+      if (recipient && (recipient.firstName || recipient.lastName)) {
+        const fullName = [recipient.firstName, recipient.lastName].filter(Boolean).join(' ');
+        setRecipientName(fullName || 'Unknown User');
+      } else {
+        setRecipientName('User not found');
+      }
+    } catch (error) {
+      console.error('❌ Failed to validate recipient:', error);
+      setRecipientName('User not found');
+    } finally {
+      setIsValidatingRecipient(false);
+    }
+  };
+
+  // Handle phone number change with recipient validation
+  const handlePhoneNumberChange = (phone: string) => {
+    setPhoneNumber(phone);
+    
+    // Debounce the validation to avoid too many API calls
+    const timeoutId = setTimeout(() => {
+      if (type === 'send' && phone.trim()) {
+        validateRecipient(phone);
+      }
+    }, 1000); // Wait 1 second after user stops typing
+
+    return () => clearTimeout(timeoutId);
+  };
+
   const resetForm = () => {
     setAmount('');
     setDescription('');
     setPhoneNumber('');
+    setRecipientName('');
     setBankCode('');
     setAccountNumber('');
     setAccountName('');
@@ -278,13 +338,7 @@ export function QuickActionModal({ visible, onClose, type }: QuickActionModalPro
   };
 
   const handleClose = () => {
-    setAmount('');
-    setDescription('');
-    setPhoneNumber('');
-    setBankCode('');
-    setAccountNumber('');
-    setAccountName('');
-    setPin('');
+    resetForm();
     setShowBankList(false);
     setShowPaystackWebView(false);
     setPaymentUrl('');
@@ -330,10 +384,29 @@ export function QuickActionModal({ visible, onClose, type }: QuickActionModalPro
         placeholder="08012345678"
         placeholderTextColor={textColor + '80'}
         value={phoneNumber}
-        onChangeText={setPhoneNumber}
+        onChangeText={handlePhoneNumberChange}
         keyboardType="phone-pad"
         editable={!isLoading}
       />
+      
+      {/* Show recipient name when sending money */}
+      {type === 'send' && phoneNumber.length >= 10 && (
+        <View style={styles.recipientInfo}>
+          {isValidatingRecipient ? (
+            <Text style={[styles.recipientText, { color: textColor, opacity: 0.7 }]}>
+              🔍 Looking up recipient...
+            </Text>
+          ) : recipientName ? (
+            <Text style={[styles.recipientText, { color: recipientName === 'User not found' ? '#F44336' : '#4CAF50' }]}>
+              {recipientName === 'User not found' 
+                ? '❌ User not found' 
+                : `👤 Sending to: ${recipientName}`
+              }
+            </Text>
+          ) : null}
+        </View>
+      )}
+      
       <Text style={[styles.helperText, { color: textColor, opacity: 0.7 }]}>
         Only registered phone numbers can receive {type === 'send' ? 'transfers' : 'payments'}
       </Text>
@@ -358,6 +431,7 @@ export function QuickActionModal({ visible, onClose, type }: QuickActionModalPro
 
   const renderBankList = () => (
     <Modal
+      key="bank-list-modal"
       visible={showBankList}
       animationType="slide"
       onRequestClose={() => setShowBankList(false)}
@@ -370,9 +444,9 @@ export function QuickActionModal({ visible, onClose, type }: QuickActionModalPro
           </TouchableOpacity>
         </View>
         <ScrollView style={styles.bankList}>
-          {banks.map((bank) => (
+          {banks.map((bank, index) => (
             <TouchableOpacity
-              key={bank.code}
+              key={`bank-${bank.code || bank.id || index}`}
               style={[styles.bankItem, { borderBottomColor: cardColor }]}
               onPress={() => selectBank(bank)}
             >
@@ -422,7 +496,7 @@ export function QuickActionModal({ visible, onClose, type }: QuickActionModalPro
               <View style={styles.inputGroup}>
                 <Text style={[styles.label, { color: textColor }]}>Amount</Text>
                 <View style={[styles.inputContainer, { backgroundColor: cardColor, borderColor: tintColor }]}>
-                  <Text style={[styles.currency, { color: textColor }]}>₦</Text>
+                  <Text style={[styles.currency, { color: textColor }]}>₵</Text>
                   <TextInput
                     style={[styles.input, { color: textColor }]}
                     placeholder="0.00"
@@ -484,9 +558,9 @@ export function QuickActionModal({ visible, onClose, type }: QuickActionModalPro
                 />
               </View>
 
-              {(type === 'send' || type === 'pay' || type === 'withdraw') && (
+              {(type === 'topup' || type === 'send' || type === 'pay' || type === 'withdraw') && (
                 <View style={styles.inputGroup}>
-                  <Text style={[styles.label, { color: textColor }]}>PIN (Optional)</Text>
+                  <Text style={[styles.label, { color: textColor }]}>PIN</Text>
                   <TextInput
                     style={[styles.textInput, { backgroundColor: cardColor, borderColor: tintColor, color: textColor }]}
                     placeholder="Enter your wallet PIN"
@@ -684,5 +758,13 @@ const styles = StyleSheet.create({
   },
   bankName: {
     fontSize: 16,
+  },
+  recipientInfo: {
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  recipientText: {
+    fontSize: 14,
+    fontWeight: '500',
   },
 });

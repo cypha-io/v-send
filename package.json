@@ -13,6 +13,7 @@
     "inspect-db": "node ./scripts/inspectDatabase.js",
     "test-connection": "node ./scripts/testConnection.js",
     "get-api-key": "node ./scripts/getApiKey.js",
+    "setup-collections": "node ./scripts/setupCollections.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
@@ -45,7 +46,6 @@
     "expo-web-browser": "~14.2.0",
     "mongodb": "^6.18.0",
     "mongoose": "^8.17.0",
-    "node-appwrite": "^17.2.0",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "react-hook-form": "^7.62.0",
@@ -66,6 +66,7 @@
     "@types/react": "~19.0.10",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~9.2.0",
+    "node-appwrite": "^17.2.0",
     "typescript": "~5.8.3"
   },
   "private": true

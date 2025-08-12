@@ -1,5 +1,6 @@
 import { config, databases } from '@/config/appwrite';
 import * as Crypto from 'expo-crypto';
+import { Query } from 'react-native-appwrite';
 
 export interface PinSetupRequest {
   userId: string;
@@ -51,17 +52,19 @@ export class PinService {
 
       // Generate salt and hash PIN
       const salt = await this.generateSalt();
-      const hashedPin = this.hashPin(request.pin, salt);
+      const hashedPin = await this.hashPin(request.pin, salt);
 
-      // Store PIN in user profile
-      await databases.updateDocument(
+      // Store PIN in pins collection
+      await databases.createDocument(
         config.databaseId,
-        config.collections.users,
-        request.userId,
+        config.collections.pins,
+        'unique()',
         {
-          pinHash: hashedPin,
-          pinSalt: salt,
-          isPinSet: true,
+          userId: request.userId,
+          hashedPin: hashedPin,
+          salt: salt,
+          isActive: true,
+          lastUsedAt: new Date().toISOString(),
         }
       );
 
@@ -75,27 +78,42 @@ export class PinService {
   // Validate PIN for transactions
   static async validatePin(request: PinValidationRequest): Promise<boolean> {
     try {
-      // Get user PIN data
-      const user = await databases.getDocument(
+      // Get user PIN data from pins collection
+      const pinResult = await databases.listDocuments(
         config.databaseId,
-        config.collections.users,
-        request.userId
+        config.collections.pins,
+        [
+          Query.equal('userId', request.userId),
+          Query.equal('isActive', true)
+        ]
       );
       
-      if (!user.isPinSet || !user.pinHash || !user.pinSalt) {
+      if (pinResult.documents.length === 0) {
         throw new Error('PIN not set up. Please set up your PIN first.');
       }
 
+      const pinData = pinResult.documents[0];
+
       // Hash provided PIN with stored salt
-      const hashedPin = this.hashPin(request.pin, user.pinSalt);
+      const hashedPin = await this.hashPin(request.pin, pinData.salt);
 
       // Compare with stored hash
-      const isValid = hashedPin === user.pinHash;
+      const isValid = hashedPin === pinData.hashedPin;
       
       if (!isValid) {
         console.log('❌ Invalid PIN attempt for user:', request.userId);
       } else {
         console.log('✅ PIN validated successfully for user:', request.userId);
+        
+        // Update last used timestamp
+        await databases.updateDocument(
+          config.databaseId,
+          config.collections.pins,
+          pinData.$id,
+          {
+            lastUsedAt: new Date().toISOString()
+          }
+        );
       }
 
       return isValid;
@@ -108,12 +126,15 @@ export class PinService {
   // Check if user has PIN set up
   static async isPinSet(userId: string): Promise<boolean> {
     try {
-      const user = await databases.getDocument(
+      const pinResult = await databases.listDocuments(
         config.databaseId,
-        config.collections.users,
-        userId
+        config.collections.pins,
+        [
+          Query.equal('userId', userId),
+          Query.equal('isActive', true)
+        ]
       );
-      return user.isPinSet || false;
+      return pinResult.documents.length > 0;
     } catch (error) {
       console.error('❌ PIN check error:', error);
       return false;
@@ -127,6 +148,27 @@ export class PinService {
       const isOldPinValid = await this.validatePin({ userId, pin: oldPin });
       if (!isOldPinValid) {
         throw new Error('Current PIN is incorrect');
+      }
+
+      // Deactivate old PIN
+      const pinResult = await databases.listDocuments(
+        config.databaseId,
+        config.collections.pins,
+        [
+          Query.equal('userId', userId),
+          Query.equal('isActive', true)
+        ]
+      );
+
+      if (pinResult.documents.length > 0) {
+        await databases.updateDocument(
+          config.databaseId,
+          config.collections.pins,
+          pinResult.documents[0].$id,
+          {
+            isActive: false
+          }
+        );
       }
 
       // Set up new PIN

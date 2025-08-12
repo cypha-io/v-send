@@ -110,7 +110,7 @@ export class EnhancedWalletService {
       }
 
       // Get sender details for receipt
-      const sender = await this.walletService.getUserByPhone(senderAccount.userId);
+      const sender = await this.walletService.getUserById(request.fromUserId);
       if (!sender) {
         throw new Error('Sender details not found');
       }
@@ -123,20 +123,31 @@ export class EnhancedWalletService {
         request.description
       );
 
-      // Create receipt
-      await receiptService.createReceipt(transaction.$id, {
-        type: 'send',
-        amount: request.amount,
-        currency: 'GHS',
-        senderName: `${sender.firstName} ${sender.lastName}`.trim() || sender.phoneNumber,
-        senderPhone: sender.phoneNumber,
-        recipientName: `${recipient.firstName} ${recipient.lastName}`.trim() || recipient.phoneNumber,
-        recipientPhone: recipient.phoneNumber,
-        description: request.description,
-        status: 'success',
-        balanceAfter: senderAccount.balance - request.amount,
-        paymentReference: transaction.$id,
-      });
+      // Create receipt (optional - skip if collection doesn't exist)
+      try {
+        if (transaction.$id) {
+          const senderWalletId = (senderAccount as any).$id;
+          await receiptService.createReceipt(
+            transaction.$id,
+            senderWalletId, // Pass the sender's wallet account ID
+            {
+              type: 'send',
+              amount: request.amount,
+              currency: 'GHS',
+              senderName: `${sender.firstName} ${sender.lastName}`.trim() || sender.phoneNumber,
+              senderPhone: sender.phoneNumber,
+              recipientName: `${recipient.firstName} ${recipient.lastName}`.trim() || recipient.phoneNumber,
+              recipientPhone: recipient.phoneNumber,
+              description: request.description,
+              status: 'success',
+              balanceAfter: senderAccount.balance - request.amount,
+              paymentReference: transaction.$id,
+            }
+          );
+        }
+      } catch (error) {
+        console.log('⚠️ Receipt creation skipped:', error);
+      }
 
       console.log('✅ Money sent successfully with receipt:', transaction);
       return transaction;
@@ -170,7 +181,7 @@ export class EnhancedWalletService {
       }
 
       // Get user details for receipt
-      const user = await this.walletService.getUserByPhone(userAccount.userId);
+      const user = await this.walletService.getUserById(request.userId);
       if (!user) {
         throw new Error('User details not found');
       }
@@ -183,20 +194,31 @@ export class EnhancedWalletService {
         `Payment: ${request.description}`
       );
 
-      // Create receipt
-      await receiptService.createReceipt(transaction.$id || '', {
-        type: 'payment',
-        amount: request.amount,
-        currency: 'GHS',
-        senderName: `${user.firstName} ${user.lastName}`.trim() || user.phoneNumber,
-        senderPhone: user.phoneNumber,
-        recipientName: `${merchant.firstName} ${merchant.lastName}`.trim() || merchant.phoneNumber,
-        recipientPhone: merchant.phoneNumber,
-        description: request.description,
-        status: 'success',
-        balanceAfter: userAccount.balance - request.amount,
-        paymentReference: transaction.$id,
-      });
+      // Create receipt (optional - skip if collection doesn't exist)
+      try {
+        if (transaction.$id) {
+          const userWalletId = (userAccount as any).$id;
+          await receiptService.createReceipt(
+            transaction.$id,
+            userWalletId, // Pass the user's wallet account ID
+            {
+              type: 'payment',
+              amount: request.amount,
+              currency: 'GHS',
+              senderName: `${user.firstName} ${user.lastName}`.trim() || user.phoneNumber,
+              senderPhone: user.phoneNumber,
+              recipientName: `${merchant.firstName} ${merchant.lastName}`.trim() || merchant.phoneNumber,
+              recipientPhone: merchant.phoneNumber,
+              description: request.description,
+              status: 'success',
+              balanceAfter: userAccount.balance - request.amount,
+              paymentReference: transaction.$id,
+            }
+          );
+        }
+      } catch (error) {
+        console.log('⚠️ Receipt creation skipped:', error);
+      }
 
       console.log('✅ Payment completed successfully:', transaction);
       return transaction;
@@ -366,37 +388,46 @@ export class EnhancedWalletService {
     }
   }
 
-  // Validate phone number format
+  // Validate phone number format for Ghana
   validatePhoneNumber(phoneNumber: string): { isValid: boolean; error?: string } {
     // Remove any spaces, dashes, or special characters
     const cleanPhone = phoneNumber.replace(/[\s\-\(\)]/g, '');
     
-    // Check if it's a valid Nigerian phone number format
-    const nigerianPhoneRegex = /^(\+234|234|0)?([789][01])\d{8}$/;
+    // Check if it's a valid Ghanaian phone number format
+    // Ghana phone numbers: +233 XX XXX XXXX or 0XX XXX XXXX
+    // Common prefixes: 020, 023, 024, 025, 026, 027, 028, 050, 051, 052, 053, 054, 055, 056, 057, 059
+    const ghanaPhoneRegex = /^(\+233|233|0)?(20|23|24|25|26|27|28|50|51|52|53|54|55|56|57|59)\d{7}$/;
     
-    if (!nigerianPhoneRegex.test(cleanPhone)) {
+    // Also accept any 10-digit number starting with 0 (flexible for any registered users)
+    const generalPhoneRegex = /^0\d{9}$/;
+    
+    if (!ghanaPhoneRegex.test(cleanPhone) && !generalPhoneRegex.test(cleanPhone)) {
       return {
         isValid: false,
-        error: 'Please enter a valid Nigerian phone number (e.g., 08012345678)'
+        error: 'Please enter a valid Ghanaian phone number (e.g., 0201234567 or 0551234567)'
       };
     }
 
     return { isValid: true };
   }
 
-  // Format phone number consistently
+  // Format phone number consistently for Ghana
   formatPhoneNumber(phoneNumber: string): string {
     const cleanPhone = phoneNumber.replace(/[\s\-\(\)]/g, '');
     
     // Convert to standard format (without country code)
-    if (cleanPhone.startsWith('+234')) {
+    if (cleanPhone.startsWith('+233')) {
       return '0' + cleanPhone.substring(4);
-    } else if (cleanPhone.startsWith('234')) {
+    } else if (cleanPhone.startsWith('233')) {
       return '0' + cleanPhone.substring(3);
     } else if (cleanPhone.startsWith('0')) {
       return cleanPhone;
     } else {
-      return '0' + cleanPhone;
+      // If it's just the 9 digits without leading 0, add it
+      if (cleanPhone.length === 9) {
+        return '0' + cleanPhone;
+      }
+      return cleanPhone;
     }
   }
 }

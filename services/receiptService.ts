@@ -1,4 +1,5 @@
 import { config, databases } from '@/config/appwrite';
+import { Query } from 'react-native-appwrite';
 
 export interface TransactionReceipt {
   id: string;
@@ -36,6 +37,7 @@ export class ReceiptService {
   // Create receipt for transaction
   static async createReceipt(
     transactionId: string,
+    walletAccountId: string,
     transactionData: {
       type: 'send' | 'receive' | 'topup' | 'payment';
       amount: number;
@@ -55,30 +57,34 @@ export class ReceiptService {
     try {
       const receiptNumber = this.generateReceiptNumber();
       
-      const receiptData = {
-        transactionId,
-        receiptNumber,
-        transactionType: transactionData.type,
-        amount: transactionData.amount,
-        currency: transactionData.currency,
-        senderName: transactionData.senderName,
-        senderPhone: transactionData.senderPhone,
-        recipientName: transactionData.recipientName || '',
-        recipientPhone: transactionData.recipientPhone || '',
-        description: transactionData.description,
-        status: transactionData.status,
-        timestamp: new Date().toISOString(),
-        paymentReference: transactionData.paymentReference || '',
-        fee: transactionData.fee || 0,
-        balanceAfter: transactionData.balanceAfter,
-        metadata: JSON.stringify(transactionData.metadata || {}),
-      };
-
       const receipt = await databases.createDocument(
         config.databaseId,
-        config.collections.receipts,
+        config.collections.transactions, // Use transactions collection instead of receipts
         'unique()',
-        receiptData
+        {
+          walletAccountId, // Required field
+          type: `receipt_${transactionData.type}`, // Receipt-specific type
+          amount: transactionData.amount,
+          description: `Receipt: ${transactionData.description}`,
+          reference: receiptNumber,
+          status: transactionData.status,
+          recipientPhone: transactionData.recipientPhone || '',
+          metadata: JSON.stringify({
+            isReceipt: true,
+            receiptNumber,
+            originalTransactionId: transactionId,
+            transactionType: transactionData.type,
+            senderName: transactionData.senderName,
+            senderPhone: transactionData.senderPhone,
+            recipientName: transactionData.recipientName || '',
+            currency: transactionData.currency,
+            fee: transactionData.fee || 0,
+            balanceAfter: transactionData.balanceAfter,
+            paymentReference: transactionData.paymentReference || '',
+            timestamp: new Date().toISOString(),
+            ...transactionData.metadata
+          }),
+        }
       );
 
       console.log('✅ Receipt created:', receiptNumber);
@@ -94,9 +100,15 @@ export class ReceiptService {
     try {
       const response = await databases.listDocuments(
         config.databaseId,
-        config.collections.receipts,
+        config.collections.transactions, // Use transactions collection
         [
-          `transactionId.equal("${transactionId}")`
+          Query.equal('type', [
+            'receipt_send', 
+            'receipt_receive', 
+            'receipt_topup', 
+            'receipt_payment'
+          ]),
+          Query.contains('metadata', transactionId) // Look for transaction ID in metadata
         ]
       );
 
@@ -116,9 +128,15 @@ export class ReceiptService {
     try {
       const response = await databases.listDocuments(
         config.databaseId,
-        config.collections.receipts,
+        config.collections.transactions, // Use transactions collection
         [
-          `receiptNumber.equal("${receiptNumber}")`
+          Query.equal('reference', receiptNumber), // Receipt number is stored as reference
+          Query.equal('type', [
+            'receipt_send', 
+            'receipt_receive', 
+            'receipt_topup', 
+            'receipt_payment'
+          ])
         ]
       );
 
@@ -142,10 +160,17 @@ export class ReceiptService {
     try {
       const response = await databases.listDocuments(
         config.databaseId,
-        config.collections.receipts,
+        config.collections.transactions, // Use transactions collection
         [
-          `senderPhone.equal("${userPhone}")`,
-          `recipientPhone.equal("${userPhone}")`,
+          Query.equal('type', [
+            'receipt_send', 
+            'receipt_receive', 
+            'receipt_topup', 
+            'receipt_payment'
+          ]),
+          Query.or([
+            Query.contains('metadata', userPhone), // Look for phone in metadata
+          ])
         ]
       );
 
@@ -170,7 +195,7 @@ export class ReceiptService {
 
       await databases.updateDocument(
         config.databaseId,
-        config.collections.receipts,
+        config.collections.transactions, // Use transactions collection
         receiptId,
         updateData
       );
@@ -227,24 +252,26 @@ export class ReceiptService {
 
   // Map database document to TransactionReceipt interface
   private static mapReceiptFromDatabase(doc: any): TransactionReceipt {
+    const metadata = doc.metadata ? JSON.parse(doc.metadata) : {};
+    
     return {
       id: doc.$id,
-      transactionId: doc.transactionId,
-      receiptNumber: doc.receiptNumber,
-      transactionType: doc.transactionType,
+      transactionId: metadata.originalTransactionId || doc.$id,
+      receiptNumber: metadata.receiptNumber || doc.reference,
+      transactionType: metadata.transactionType || doc.type.replace('receipt_', ''),
       amount: doc.amount,
-      currency: doc.currency,
-      senderName: doc.senderName,
-      senderPhone: doc.senderPhone,
-      recipientName: doc.recipientName || undefined,
-      recipientPhone: doc.recipientPhone || undefined,
+      currency: metadata.currency || 'GHS',
+      senderName: metadata.senderName || 'Unknown',
+      senderPhone: metadata.senderPhone || '',
+      recipientName: metadata.recipientName || undefined,
+      recipientPhone: doc.recipientPhone || metadata.recipientPhone || undefined,
       description: doc.description,
       status: doc.status,
-      timestamp: doc.timestamp,
-      paymentReference: doc.paymentReference || undefined,
-      fee: doc.fee || 0,
-      balanceAfter: doc.balanceAfter,
-      metadata: doc.metadata ? JSON.parse(doc.metadata) : undefined,
+      timestamp: metadata.timestamp || doc.$createdAt,
+      paymentReference: metadata.paymentReference || undefined,
+      fee: metadata.fee || 0,
+      balanceAfter: metadata.balanceAfter || 0,
+      metadata: metadata,
     };
   }
 }

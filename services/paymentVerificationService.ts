@@ -1,4 +1,5 @@
 import { config, databases } from '@/config/appwrite';
+import { Query } from 'react-native-appwrite';
 
 export interface PaymentVerificationResult {
   success: boolean;
@@ -68,7 +69,7 @@ export class PaymentVerificationService {
       const accountResponse = await databases.listDocuments(
         config.databaseId,
         config.collections.walletAccounts,
-        [`userId.equal("${userId}")`]
+        [Query.equal('userId', userId)]
       );
 
       if (accountResponse.documents.length === 0) {

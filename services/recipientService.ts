@@ -1,4 +1,5 @@
 import { config, databases } from '@/config/appwrite';
+import { Query } from 'react-native-appwrite';
 
 export interface RecipientInfo {
   id: string;
@@ -20,7 +21,7 @@ export class RecipientService {
         config.databaseId,
         config.collections.users,
         [
-          `phoneNumber.equal("${phoneNumber}")`
+          Query.equal('phoneNumber', phoneNumber)
         ]
       );
 
@@ -115,7 +116,7 @@ export class RecipientService {
         config.databaseId,
         config.collections.users,
         [
-          `phoneNumber.search("${query}")`
+          Query.search('phoneNumber', query)
         ]
       );
 
@@ -124,7 +125,7 @@ export class RecipientService {
         config.databaseId,
         config.collections.users,
         [
-          `firstName.search("${query}")`
+          Query.search('firstName', query)
         ]
       );
 
@@ -133,7 +134,7 @@ export class RecipientService {
         config.databaseId,
         config.collections.users,
         [
-          `lastName.search("${query}")`
+          Query.search('lastName', query)
         ]
       );
 
