@@ -271,6 +271,7 @@ type WalletAction =
   | { type: 'ADD_TRANSACTION'; payload: Transaction }
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_ERROR'; payload: string | undefined }
+  | { type: 'TOGGLE_BALANCE_VISIBILITY' }
   | { type: 'CLEAR_WALLET' };
 
 const walletReducer = (state: WalletState, action: WalletAction): WalletState => {
@@ -308,12 +309,18 @@ const walletReducer = (state: WalletState, action: WalletAction): WalletState =>
         error: action.payload,
         isLoading: false,
       };
+    case 'TOGGLE_BALANCE_VISIBILITY':
+      return {
+        ...state,
+        balanceVisible: !state.balanceVisible,
+      };
     case 'CLEAR_WALLET':
       return {
         account: null,
         transactions: [],
         isLoading: false,
         error: undefined,
+        balanceVisible: true,
       };
     default:
       return state;
@@ -325,6 +332,7 @@ const initialWalletState: WalletState = {
   transactions: [],
   isLoading: true,
   error: undefined,
+  balanceVisible: true,
 };
 
 const WalletContext = createContext<{
@@ -336,6 +344,7 @@ const WalletContext = createContext<{
   verifyWalletPin: (pin: string) => Promise<boolean>;
   hasWalletPin: () => Promise<boolean>;
   refreshTransactions: () => Promise<void>;
+  toggleBalanceVisibility: () => void;
   clearWallet: () => void;
 } | null>(null);
 
@@ -454,6 +463,10 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const toggleBalanceVisibility = () => {
+    dispatch({ type: 'TOGGLE_BALANCE_VISIBILITY' });
+  };
+
   const clearWallet = () => {
     dispatch({ type: 'CLEAR_WALLET' });
   };
@@ -468,6 +481,7 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
       verifyWalletPin,
       hasWalletPin,
       refreshTransactions,
+      toggleBalanceVisibility,
       clearWallet,
     }}>
       {children}

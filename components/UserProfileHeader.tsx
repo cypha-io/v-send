@@ -79,7 +79,7 @@ export function UserProfileHeader({ onLogout, showLogoutButton = true }: UserPro
           💳 {getWalletAccountNumber()}
         </Text>
         <Text style={[styles.balanceInfo, { color: '#4CAF50', fontSize: 14, fontWeight: 'bold' }]}>
-          {formatCurrency(getWalletBalance())}
+          {walletState.balanceVisible ? formatCurrency(getWalletBalance()) : '••••••'}
         </Text>
       </View>
       

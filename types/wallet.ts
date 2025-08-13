@@ -56,6 +56,7 @@ export interface WalletState {
   transactions: Transaction[];
   isLoading: boolean;
   error?: string;
+  balanceVisible: boolean;
 }
 
 export type TransactionFilter = {

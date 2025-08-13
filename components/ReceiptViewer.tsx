@@ -4,13 +4,13 @@ import { TransactionReceipt, receiptService } from '@/services/receiptService';
 import { formatCurrency } from '@/utils/format';
 import React from 'react';
 import {
-    Alert,
-    ScrollView,
-    Share,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 interface ReceiptViewerProps {
@@ -28,7 +28,7 @@ export const ReceiptViewer: React.FC<ReceiptViewerProps> = ({ receipt, onClose }
         message: summary,
         title: 'V-Send Receipt',
       });
-    } catch (error) {
+    } catch {
       Alert.alert('Error', 'Failed to share receipt');
     }
   };

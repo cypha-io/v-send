@@ -19,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function WalletDashboard() {
   const { logout } = useAuth();
-  const { state: walletState, refreshTransactions } = useWallet();
+  const { state: walletState, refreshTransactions, toggleBalanceVisibility } = useWallet();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedAction, setSelectedAction] = useState<'topup' | 'send' | 'pay' | 'withdraw'>('topup');
@@ -98,18 +98,45 @@ export default function WalletDashboard() {
           )}
         </View>
 
-        {/* Balance Card */}
+        {/* Balance Card - Enhanced UI */}
         <View style={[styles.balanceCard, { backgroundColor: tintColor }]}>
           <View style={styles.balanceHeader}>
             <Text style={styles.balanceLabel}>Your Balance</Text>
-            <Ionicons name="eye" size={20} color="rgba(255, 255, 255, 0.8)" />
+            <TouchableOpacity
+              onPress={toggleBalanceVisibility}
+              style={styles.visibilityButton}
+              activeOpacity={0.7}
+            >
+              <Ionicons 
+                name={walletState.balanceVisible ? "eye" : "eye-off"} 
+                size={20} 
+                color="rgba(255, 255, 255, 0.9)" 
+              />
+            </TouchableOpacity>
           </View>
-          <Text style={styles.balanceAmount}>
-            {formatCurrency(walletState.account?.balance || 0)}
-          </Text>
-          <Text style={styles.accountNumber}>
-            Account: {walletState.account?.accountNumber || 'Loading...'}
-          </Text>
+          <View style={styles.balanceDisplay}>
+            <Text style={styles.balanceAmount}>
+              {walletState.balanceVisible 
+                ? formatCurrency(walletState.account?.balance || 0)
+                : '••••••'
+              }
+            </Text>
+            {walletState.balanceVisible && (
+              <View style={styles.balanceTrend}>
+                <Ionicons name="trending-up" size={16} color="rgba(255, 255, 255, 0.8)" />
+                <Text style={styles.trendText}>Available</Text>
+              </View>
+            )}
+          </View>
+          <View style={styles.accountInfo}>
+            <Text style={styles.accountNumber}>
+              Account: {walletState.account?.accountNumber || 'Loading...'}
+            </Text>
+            <View style={styles.statusIndicator}>
+              <View style={styles.statusDot} />
+              <Text style={styles.statusText}>Active</Text>
+            </View>
+          </View>
         </View>
 
         {/* Quick Actions */}
@@ -296,12 +323,13 @@ const styles = StyleSheet.create({
     margin: 20,
     padding: 24,
     borderRadius: 20,
-    alignItems: 'center',
     elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
+    position: 'relative',
+    overflow: 'hidden',
   },
   balanceHeader: {
     flexDirection: 'row',
@@ -315,15 +343,56 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
+  visibilityButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  balanceDisplay: {
+    alignItems: 'center',
+    marginVertical: 12,
+  },
   balanceAmount: {
     color: 'white',
     fontSize: 36,
     fontWeight: 'bold',
-    marginVertical: 12,
+    marginBottom: 8,
+  },
+  balanceTrend: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  trendText: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  accountInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
   },
   accountNumber: {
     color: 'rgba(255, 255, 255, 0.8)',
     fontSize: 14,
+    fontWeight: '500',
+  },
+  statusIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#4CAF50',
+  },
+  statusText: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 12,
     fontWeight: '500',
   },
   quickActions: {
